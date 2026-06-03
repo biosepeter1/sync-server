@@ -1,24 +1,33 @@
-# fly.toml file for boalix-sync-server
+# fly.toml app configuration file generated for boalix-sync on 2026-06-03T19:27:43Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-app = "boalix-sync-server"
-primary_region = "sea" # You can change this to your preferred region (e.g., iad, lhr, ams)
+app = 'boalix-sync'
+primary_region = 'jnb'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
+
+[env]
+  DATABASE_PATH = '/data/boalix-sync.db'
+  PORT = '8080'
+  RUST_LOG = 'boalix_sync_server=info,warn'
+
+[[mounts]]
+  source = 'boalix_sync_data'
+  destination = '/data'
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = false # Keep it always running for instant tracking response
+  auto_stop_machines = 'off'
   auto_start_machines = true
   min_machines_running = 1
-  processes = ["app"]
+  processes = ['app']
 
-[mounts]
-  source = "boalix_sync_data"
-  destination = "/data"
-
-[env]
-  PORT = "8080"
-  DATABASE_PATH = "/data/boalix-sync.db"
-  RUST_LOG = "boalix_sync_server=info,warn"
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024
