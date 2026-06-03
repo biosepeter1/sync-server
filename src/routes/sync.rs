@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 use crate::auth::{require_api_key, TenantId};
 
 pub fn router() -> Router {
-    Router::new()
+    let authenticated_routes = Router::new()
         // Event batch push — desktop → cloud
         .route("/api/events", post(push_events))
         // Queue registration — desktop tells server about tracking IDs before sending
@@ -28,10 +28,13 @@ pub fn router() -> Router {
         // Active tracking domain management
         .route("/api/domain", get(get_active_domain))
         .route("/api/domain", put(update_active_domain))
-        // Tenant self-registration (for initial setup)
-        .route("/api/register", post(register_tenant))
         // Apply API key auth middleware to all /api/* routes
-        .route_layer(middleware::from_fn(require_api_key))
+        .route_layer(middleware::from_fn(require_api_key));
+
+    Router::new()
+        .merge(authenticated_routes)
+        // Tenant self-registration (for initial setup) - bypasses X-Api-Key auth
+        .route("/api/register", post(register_tenant))
 }
 
 // ── Structs ───────────────────────────────────────────────────────────────────
