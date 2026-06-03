@@ -1,0 +1,30 @@
+# render.yaml — Render.com deployment configuration (free tier)
+# Deploy at: https://render.com/deploy
+
+services:
+  - type: web
+    name: boalix-sync-server
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free           # Change to 'starter' ($7/mo) for always-on
+    healthCheckPath: /ping
+
+    # Persistent disk for SQLite database (only available on paid plans)
+    # For free tier: data resets on each deploy (events are safe on desktop side)
+    # disk:
+    #   name: boalix-db
+    #   mountPath: /data
+    #   sizeGB: 1
+
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: DATABASE_PATH
+        value: /data/boalix-sync.db
+      - key: RUST_LOG
+        value: boalix_sync_server=info,warn
+      # ⚠️ Set these in the Render dashboard as SECRET values:
+      - key: TRACKING_DOMAIN
+        sync: false   # Set to your real domain e.g. https://track.yourdomain.com
+      - key: API_SECRET
+        sync: false   # Set a long random secret (openssl rand -hex 32)
