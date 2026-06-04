@@ -175,7 +175,9 @@ async fn pull_events(
     Extension(TenantId(tenant_id)): Extension<TenantId>,
     Query(q): Query<PullQuery>,
 ) -> Json<Value> {
-    let since = q.since.as_deref().unwrap_or("1970-01-01T00:00:00");
+    let since = q.since.as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or("1970-01-01T00:00:00");
     let limit = q.limit.unwrap_or(500).min(2000) as i64;
 
     let events = crate::db::with_db(|conn| {
