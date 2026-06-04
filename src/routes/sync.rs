@@ -183,7 +183,7 @@ async fn pull_events(
             "SELECT id, campaign_id, subscriber_id, event_type, ab_variant, metadata, occurred_at
              FROM delivery_events
              WHERE tenant_id = ?1
-               AND occurred_at > ?2
+               AND occurred_at > datetime(?2)
                AND synced_from = 'direct'
              ORDER BY occurred_at ASC
              LIMIT ?3"
