@@ -20,6 +20,21 @@ pub async fn init() -> anyhow::Result<()> {
     let _ = conn.execute("ALTER TABLE delivery_events ADD COLUMN synced_from TEXT", []);
     let _ = conn.execute("ALTER TABLE delivery_events ADD COLUMN metadata TEXT DEFAULT '{}'", []);
 
+    // Seed/Update default tenant using the master API_SECRET if configured
+    let api_secret = crate::config::api_secret();
+    if !api_secret.is_empty() && api_secret != "change-me-in-production" {
+        let res = conn.execute(
+            "INSERT INTO tenants (id, name, api_key) VALUES ('biopete16', 'Default Tenant', ?1)
+             ON CONFLICT(id) DO UPDATE SET api_key = excluded.api_key",
+            rusqlite::params![api_secret],
+        );
+        if let Err(e) = res {
+            tracing::error!("Failed to seed/update default tenant: {}", e);
+        } else {
+            tracing::info!("Successfully seeded/updated default tenant 'biopete16' with master API_SECRET");
+        }
+    }
+
     DB.set(Mutex::new(conn))
         .map_err(|_| anyhow::anyhow!("DB already initialized"))?;
 
