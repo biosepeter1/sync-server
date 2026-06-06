@@ -14,11 +14,40 @@ pub async fn init() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // Set up connection manager
+    // 1. Run WAL mode setup, schema creation, and tenant seeding on a single connection
+    // to avoid concurrent SQLite write contention during pool initialization.
+    {
+        let conn = Connection::open(&path)?;
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;"
+        )?;
+        conn.execute_batch(SCHEMA)?;
+
+        // Migrations for schema evolution
+        let _ = conn.execute("ALTER TABLE delivery_events ADD COLUMN synced_from TEXT", []);
+        let _ = conn.execute("ALTER TABLE delivery_events ADD COLUMN metadata TEXT DEFAULT '{}'", []);
+
+        // Seed/Update default tenant using the master API_SECRET if configured
+        let api_secret = crate::config::api_secret();
+        if !api_secret.is_empty() && api_secret != "change-me-in-production" {
+            let res = conn.execute(
+                "INSERT INTO tenants (id, name, api_key) VALUES ('biopete16', 'Default Tenant', ?1)
+                 ON CONFLICT(id) DO UPDATE SET api_key = excluded.api_key",
+                rusqlite::params![api_secret],
+            );
+            if let Err(e) = res {
+                tracing::error!("Failed to seed/update default tenant: {}", e);
+            } else {
+                tracing::info!("Successfully seeded/updated default tenant 'biopete16' with master API_SECRET");
+            }
+        }
+    }
+
+    // 2. Set up connection manager for the pool with connection-specific settings.
+    // WAL mode is persistent in the file, so we do not need to call journal_mode=WAL here.
     let manager = SqliteConnectionManager::file(&path)
         .with_init(|c| {
-            // Enable WAL mode and set busy timeout on every connection opened by the pool
-            c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;")
+            c.execute_batch("PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;")
         });
 
     // Create pool with 10 max connections
@@ -26,31 +55,6 @@ pub async fn init() -> anyhow::Result<()> {
         .max_size(10)
         .build(manager)
         .map_err(|e| anyhow::anyhow!("Failed to build database pool: {}", e))?;
-
-    // Get an initialization connection to run migrations
-    let conn = pool.get()
-        .map_err(|e| anyhow::anyhow!("Failed to acquire init connection: {}", e))?;
-
-    conn.execute_batch(SCHEMA)?;
-
-    // Migrations for schema evolution
-    let _ = conn.execute("ALTER TABLE delivery_events ADD COLUMN synced_from TEXT", []);
-    let _ = conn.execute("ALTER TABLE delivery_events ADD COLUMN metadata TEXT DEFAULT '{}'", []);
-
-    // Seed/Update default tenant using the master API_SECRET if configured
-    let api_secret = crate::config::api_secret();
-    if !api_secret.is_empty() && api_secret != "change-me-in-production" {
-        let res = conn.execute(
-            "INSERT INTO tenants (id, name, api_key) VALUES ('biopete16', 'Default Tenant', ?1)
-             ON CONFLICT(id) DO UPDATE SET api_key = excluded.api_key",
-            rusqlite::params![api_secret],
-        );
-        if let Err(e) = res {
-            tracing::error!("Failed to seed/update default tenant: {}", e);
-        } else {
-            tracing::info!("Successfully seeded/updated default tenant 'biopete16' with master API_SECRET");
-        }
-    }
 
     DB_POOL.set(pool)
         .map_err(|_| anyhow::anyhow!("DB pool already initialized"))?;
