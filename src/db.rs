@@ -2,17 +2,34 @@
 
 use once_cell::sync::OnceCell;
 use rusqlite::{Connection, params};
-use std::sync::Mutex;
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
 
-pub static DB: OnceCell<Mutex<Connection>> = OnceCell::new();
+pub static DB_POOL: OnceCell<Pool<SqliteConnectionManager>> = OnceCell::new();
 
 pub async fn init() -> anyhow::Result<()> {
     let path = crate::config::database_path();
-    let conn = Connection::open(&path)?;
 
-    conn.execute_batch(
-        "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;"
-    )?;
+    if DB_POOL.get().is_some() {
+        return Ok(());
+    }
+
+    // Set up connection manager
+    let manager = SqliteConnectionManager::file(&path)
+        .with_init(|c| {
+            // Enable WAL mode and set busy timeout on every connection opened by the pool
+            c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;")
+        });
+
+    // Create pool with 10 max connections
+    let pool = Pool::builder()
+        .max_size(10)
+        .build(manager)
+        .map_err(|e| anyhow::anyhow!("Failed to build database pool: {}", e))?;
+
+    // Get an initialization connection to run migrations
+    let conn = pool.get()
+        .map_err(|e| anyhow::anyhow!("Failed to acquire init connection: {}", e))?;
 
     conn.execute_batch(SCHEMA)?;
 
@@ -35,8 +52,8 @@ pub async fn init() -> anyhow::Result<()> {
         }
     }
 
-    DB.set(Mutex::new(conn))
-        .map_err(|_| anyhow::anyhow!("DB already initialized"))?;
+    DB_POOL.set(pool)
+        .map_err(|_| anyhow::anyhow!("DB pool already initialized"))?;
 
     Ok(())
 }
@@ -45,12 +62,11 @@ pub fn with_db<F, T>(f: F) -> anyhow::Result<T>
 where
     F: FnOnce(&mut Connection) -> anyhow::Result<T>,
 {
-    let mut guard = DB
-        .get()
-        .ok_or_else(|| anyhow::anyhow!("Database not initialized"))?
-        .lock()
-        .map_err(|_| anyhow::anyhow!("DB mutex poisoned"))?;
-    f(&mut *guard)
+    let pool = DB_POOL.get()
+        .ok_or_else(|| anyhow::anyhow!("Database pool not initialized"))?;
+    let mut conn = pool.get()
+        .map_err(|e| anyhow::anyhow!("Failed to acquire connection from pool: {}", e))?;
+    f(&mut *conn)
 }
 
 /// Log a tracking event to the server-side database.

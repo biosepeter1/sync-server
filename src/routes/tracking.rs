@@ -127,6 +127,20 @@ async fn handle_unsubscribe(Path(id): Path<String>) -> Html<String> {
     }).unwrap_or(None);
 
     if let Some((email, sub_id, camp_id, variant, tenant_id)) = result {
+        // Check if already in suppressions
+        let already_unsubscribed = crate::db::with_db(|conn| {
+            let count: i32 = conn.query_row(
+                "SELECT COUNT(*) FROM suppressions WHERE LOWER(email) = LOWER(?1) AND tenant_id = ?2",
+                rusqlite::params![&email, &tenant_id],
+                |row| row.get(0)
+            ).unwrap_or(0);
+            Ok(count > 0)
+        }).unwrap_or(false);
+
+        if already_unsubscribed {
+            return Html(unsubscribe_page_already(&email));
+        }
+
         // Add to suppression list
         crate::db::with_db(|conn| {
             conn.execute(
@@ -222,65 +236,126 @@ fn decode_test_email(id: &str) -> String {
 
 fn unsubscribe_page_test(email: &str) -> String {
     format!(r#"<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Unsubscribed (Test Mode)</title>
-<style>
-  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; background:#f4f5f6; margin:0; }}
-  .card {{ text-align:center; background:#fff; padding:48px; border-radius:24px; border:1px solid rgba(0,0,0,.08); box-shadow:0 20px 25px -5px rgba(0,0,0,.03); max-width:450px; width:100%; box-sizing:border-box; }}
-  .icon {{ width:64px; height:64px; background:#f0fdf4; border:1px solid #dcfce7; border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 24px; color:#16a34a; }}
-  .badge {{ display:inline-block; background:#eff6ff; border:1px solid #bfdbfe; color:#1d4ed8; font-size:11px; font-weight:700; padding:3px 8px; border-radius:6px; text-transform:uppercase; letter-spacing:.05em; margin-bottom:16px; }}
-  h1 {{ margin:0 0 12px; font-size:24px; font-weight:700; color:#09090b; }}
-  p {{ color:#4b5563; margin:0; font-size:14px; line-height:1.6; }}
-  .pill {{ display:inline-block; background:#f4f4f5; border:1px solid #e4e4e7; padding:6px 16px; border-radius:9999px; font-family:monospace; font-size:13px; color:#27272a; margin-top:16px; }}
-  .notice {{ margin-top:20px; padding:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; font-size:12px; color:#64748b; }}
-  .footer {{ margin-top:32px; font-size:12px; font-weight:600; color:#a1a1aa; letter-spacing:.05em; text-transform:uppercase; }}
-</style></head><body>
-  <div class="card">
-    <div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>
-    <div class="badge">Test Mode</div>
-    <h1>Unsubscribed</h1>
-    <p>This is a simulated unsubscribe flow. In a live campaign, this would remove:</p>
-    <div class="pill">{}</div>
-    <div class="notice"><strong>Verification successful:</strong> Tracking server is fully operational.</div>
-    <div class="footer">Powered by Boalix</div>
-  </div>
-</body></html>"#, email)
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unsubscribed (Test Mode)</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; background-color: #f8fafc; margin: 0; color: #0f172a; }}
+        .card {{ text-align: center; background: #ffffff; padding: 48px; border-radius: 24px; border: 1px solid rgba(15, 23, 42, 0.06); box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.02), 0 8px 16px -6px rgba(0, 0, 0, 0.02); max-width: 440px; width: 100%; box-sizing: border-box; }}
+        .icon-box {{ width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 24px auto; background-color: #ecfdf5; border: 1px solid #d1fae5; color: #10b981; }}
+        .badge-test {{ display: inline-block; background-color: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 16px; }}
+        h1 {{ margin: 0 0 12px 0; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; color: #0f172a; }}
+        p {{ color: #475569; margin: 0; font-size: 14px; line-height: 1.6; }}
+        .email-pill {{ display: inline-block; background-color: #f1f5f9; border: 1px solid #e2e8f0; padding: 8px 18px; border-radius: 9999px; font-family: ui-monospace, monospace; font-size: 13px; color: #334155; margin-top: 18px; }}
+        .notice {{ margin-top: 20px; padding: 12px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 12px; color: #64748b; }}
+        .footer-logo {{ margin-top: 36px; font-size: 11px; font-weight: 700; color: #94a3b8; letter-spacing: 0.08em; text-transform: uppercase; }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon-box">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg>
+        </div>
+        <div class="badge-test">Test Mode</div>
+        <h1>Unsubscribed</h1>
+        <p>This is a simulated unsubscribe flow. In a live campaign, this would remove the following email address:</p>
+        <div class="email-pill">{}</div>
+        <div class="notice"><strong>Verification successful:</strong> Tracking server is fully operational.</div>
+        <div class="footer-logo">Powered by Boalix</div>
+    </div>
+</body>
+</html>"#, email)
 }
 
 fn unsubscribe_page_success(email: &str) -> String {
     format!(r#"<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Unsubscribed</title>
-<style>
-  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; background:#f4f5f6; margin:0; }}
-  .card {{ text-align:center; background:#fff; padding:48px; border-radius:24px; border:1px solid rgba(0,0,0,.08); box-shadow:0 20px 25px -5px rgba(0,0,0,.03); max-width:420px; width:100%; box-sizing:border-box; }}
-  .icon {{ width:64px; height:64px; background:#f0fdf4; border:1px solid #dcfce7; border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 24px; color:#16a34a; }}
-  h1 {{ margin:0 0 12px; font-size:24px; font-weight:700; color:#09090b; }}
-  p {{ color:#4b5563; margin:0; font-size:14px; line-height:1.6; }}
-  .pill {{ display:inline-block; background:#f4f4f5; border:1px solid #e4e4e7; padding:6px 16px; border-radius:9999px; font-family:monospace; font-size:13px; color:#27272a; margin-top:16px; }}
-  .footer {{ margin-top:32px; font-size:12px; font-weight:600; color:#a1a1aa; letter-spacing:.05em; text-transform:uppercase; }}
-</style></head><body>
-  <div class="card">
-    <div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>
-    <h1>Unsubscribed</h1>
-    <p>Your preferences have been updated. We've removed the following address from our mailing lists:</p>
-    <div class="pill">{}</div>
-    <div class="footer">Powered by Boalix</div>
-  </div>
-</body></html>"#, email)
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unsubscribed</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; background-color: #f8fafc; margin: 0; color: #0f172a; }}
+        .card {{ text-align: center; background: #ffffff; padding: 48px; border-radius: 24px; border: 1px solid rgba(15, 23, 42, 0.06); box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.02), 0 8px 16px -6px rgba(0, 0, 0, 0.02); max-width: 440px; width: 100%; box-sizing: border-box; }}
+        .icon-box {{ width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 24px auto; background-color: #ecfdf5; border: 1px solid #d1fae5; color: #10b981; }}
+        h1 {{ margin: 0 0 12px 0; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; color: #0f172a; }}
+        p {{ color: #475569; margin: 0; font-size: 14px; line-height: 1.6; }}
+        .email-pill {{ display: inline-block; background-color: #f1f5f9; border: 1px solid #e2e8f0; padding: 8px 18px; border-radius: 9999px; font-family: ui-monospace, monospace; font-size: 13px; color: #334155; margin-top: 18px; }}
+        .footer-logo {{ margin-top: 36px; font-size: 11px; font-weight: 700; color: #94a3b8; letter-spacing: 0.08em; text-transform: uppercase; }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon-box">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg>
+        </div>
+        <h1>Unsubscribed</h1>
+        <p>Your preferences have been updated. We've removed the following address from our mailing lists:</p>
+        <div class="email-pill">{}</div>
+        <div class="footer-logo">Powered by Boalix</div>
+    </div>
+</body>
+</html>"#, email)
+}
+
+fn unsubscribe_page_already(email: &str) -> String {
+    format!(r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Already Unsubscribed</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; background-color: #f8fafc; margin: 0; color: #0f172a; }}
+        .card {{ text-align: center; background: #ffffff; padding: 48px; border-radius: 24px; border: 1px solid rgba(15, 23, 42, 0.06); box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.02), 0 8px 16px -6px rgba(0, 0, 0, 0.02); max-width: 440px; width: 100%; box-sizing: border-box; }}
+        .icon-box {{ width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 24px auto; background-color: #eff6ff; border: 1px solid #dbeafe; color: #3b82f6; }}
+        h1 {{ margin: 0 0 12px 0; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; color: #0f172a; }}
+        p {{ color: #475569; margin: 0; font-size: 14px; line-height: 1.6; }}
+        .email-pill {{ display: inline-block; background-color: #f1f5f9; border: 1px solid #e2e8f0; padding: 8px 18px; border-radius: 9999px; font-family: ui-monospace, monospace; font-size: 13px; color: #334155; margin-top: 18px; }}
+        .footer-logo {{ margin-top: 36px; font-size: 11px; font-weight: 700; color: #94a3b8; letter-spacing: 0.08em; text-transform: uppercase; }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon-box">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+        </div>
+        <h1>Already Unsubscribed</h1>
+        <p>This email address has already been unsubscribed and removed from our mailing lists:</p>
+        <div class="email-pill">{}</div>
+        <div class="footer-logo">Powered by Boalix</div>
+    </div>
+</body>
+</html>"#, email)
 }
 
 fn unsubscribe_page_invalid() -> String {
     r#"<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><title>Invalid Link</title>
-<style>
-  body { font-family: -apple-system, sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; background:#f4f5f6; margin:0; }
-  .card { text-align:center; background:#fff; padding:48px; border-radius:24px; max-width:420px; width:100%; }
-  h1 { color:#09090b; } p { color:#4b5563; font-size:14px; }
-</style></head><body>
-  <div class="card">
-    <h1>Invalid Link</h1>
-    <p>This unsubscribe link is invalid, expired, or has already been processed.</p>
-  </div>
-</body></html>"#.to_string()
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invalid Link</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; background-color: #f8fafc; margin: 0; color: #0f172a; }
+        .card { text-align: center; background: #ffffff; padding: 48px; border-radius: 24px; border: 1px solid rgba(15, 23, 42, 0.06); box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.02), 0 8px 16px -6px rgba(0, 0, 0, 0.02); max-width: 440px; width: 100%; box-sizing: border-box; }
+        .icon-box { width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 24px auto; background-color: #fef2f2; border: 1px solid #fee2e2; color: #ef4444; }
+        h1 { margin: 0 0 12px 0; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; color: #0f172a; }
+        p { color: #475569; margin: 0; font-size: 14px; line-height: 1.6; }
+        .footer-logo { margin-top: 36px; font-size: 11px; font-weight: 700; color: #94a3b8; letter-spacing: 0.08em; text-transform: uppercase; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon-box">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+        </div>
+        <h1>Invalid Link</h1>
+        <p>This unsubscribe link is invalid, expired, or has already been processed.</p>
+        <div class="footer-logo">Powered by Boalix</div>
+    </div>
+</body>
+</html>"#.to_string()
 }
