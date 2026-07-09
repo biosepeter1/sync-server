@@ -53,8 +53,12 @@ async fn track_open(Path(id): Path<String>) -> Response {
         .decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
         .unwrap();
     Response::builder()
+        .status(200)
         .header("Content-Type", "image/gif")
+        .header("Content-Length", pixel.len().to_string())
         .header("Cache-Control", "no-cache, no-store, must-revalidate")
+        .header("Pragma", "no-cache")
+        .header("Expires", "0")
         .body(axum::body::Body::from(pixel))
         .unwrap()
 }
